@@ -1,3 +1,7 @@
+> [!NOTE]
+> This fork add implementation of GATT Server (Android only) for peripheral mode,  
+> and fixes permission error on `requestPermissions` for Android 12+
+
 # @capgo/capacitor-bluetooth-low-energy
   <a href="https://capgo.app/"><img src='https://raw.githubusercontent.com/Cap-go/capgo/main/assets/capgo_banner.png' alt='Capgo - Instant updates for capacitor'/></a>
 
