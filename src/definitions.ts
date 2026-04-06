@@ -1253,6 +1253,96 @@ export interface RequestConnectionPriorityOptions {
 }
 
 /**
+ * A characteristic definition for GATT server advertising.
+ *
+ * @since 1.2.0
+ */
+export interface GattServerCharacteristic {
+  /**
+   * The characteristic UUID.
+   *
+   * @since 1.2.0
+   */
+  uuid: string;
+
+  /**
+   * Whether the characteristic supports read.
+   *
+   * @default false
+   * @since 1.2.0
+   */
+  read?: boolean;
+
+  /**
+   * Whether the characteristic supports write.
+   *
+   * @default false
+   * @since 1.2.0
+   */
+  write?: boolean;
+
+  /**
+   * Whether the characteristic supports write without response.
+   *
+   * @default false
+   * @since 1.2.0
+   */
+  writeWithoutResponse?: boolean;
+
+  /**
+   * Whether the characteristic supports notify.
+   *
+   * @default false
+   * @since 1.2.0
+   */
+  notify?: boolean;
+
+  /**
+   * Whether the characteristic supports indicate.
+   *
+   * @default false
+   * @since 1.2.0
+   */
+  indicate?: boolean;
+
+  /**
+   * Initial value as an array of bytes.
+   *
+   * @since 1.2.0
+   */
+  value?: number[];
+}
+
+/**
+ * A service definition for GATT server advertising.
+ *
+ * @since 1.2.0
+ */
+export interface GattServerService {
+  /**
+   * The service UUID.
+   *
+   * @since 1.2.0
+   */
+  uuid: string;
+
+  /**
+   * Whether this is a primary service.
+   *
+   * @default true
+   * @since 1.2.0
+   */
+  primary?: boolean;
+
+  /**
+   * Characteristics to include in this service.
+   *
+   * @since 1.2.0
+   */
+  characteristics?: GattServerCharacteristic[];
+}
+
+/**
  * Options for starting advertising.
  *
  * @since 1.0.0
@@ -1287,6 +1377,15 @@ export interface StartAdvertisingOptions {
    * @since 1.0.0
    */
   includeTxPowerLevel?: boolean;
+
+  /**
+   * GATT server services with characteristics to host while advertising (Android only).
+   * When provided, a GATT server is created with the specified services and characteristics,
+   * and connected clients can read/write to them.
+   *
+   * @since 1.2.0
+   */
+  gattServer?: GattServerService[];
 }
 
 /**

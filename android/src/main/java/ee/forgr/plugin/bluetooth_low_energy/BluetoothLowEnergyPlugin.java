@@ -7,6 +7,8 @@ import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
+import android.bluetooth.BluetoothGattServer;
+import android.bluetooth.BluetoothGattServerCallback;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
@@ -43,6 +45,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.json.JSONArray;
 
 @CapacitorPlugin(
     name = "BluetoothLowEnergy",
@@ -68,7 +71,7 @@ import java.util.UUID;
 )
 public class BluetoothLowEnergyPlugin extends Plugin {
 
-    private final String pluginVersion = "1.1.11";
+    private final String pluginVersion = "1.2.0";
     private BluetoothManager bluetoothManager;
     private BluetoothAdapter bluetoothAdapter;
     private BluetoothLeScanner bluetoothLeScanner;
@@ -83,6 +86,10 @@ public class BluetoothLowEnergyPlugin extends Plugin {
     private Handler scanHandler;
     private boolean isScanning = false;
     private String mode = "central";
+
+    // GATT server fields
+    private BluetoothGattServer gattServer;
+    private final Map<UUID, byte[]> characteristicValues = new HashMap<>();
 
     private PluginCall pendingConnectCall;
     private PluginCall pendingDiscoverCall;
@@ -872,6 +879,7 @@ public class BluetoothLowEnergyPlugin extends Plugin {
 
         String name = call.getString("name");
         JSArray servicesArray = call.getArray("services");
+        JSArray gattServerArray = call.getArray("gattServer");
 
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
@@ -891,6 +899,16 @@ public class BluetoothLowEnergyPlugin extends Plugin {
                 }
             } catch (Exception e) {
                 // Ignore
+            }
+        }
+
+        // Build GATT server if gattServer config is provided
+        if (gattServerArray != null) {
+            try {
+                buildGattServer(gattServerArray, dataBuilder);
+            } catch (Exception e) {
+                call.reject("Failed to build GATT server: " + e.getMessage());
+                return;
             }
         }
 
@@ -914,6 +932,205 @@ public class BluetoothLowEnergyPlugin extends Plugin {
         }
     }
 
+    private void buildGattServer(JSArray gattServerArray, AdvertiseData.Builder dataBuilder) throws Exception {
+        closeGattServer();
+
+        characteristicValues.clear();
+
+        gattServer = bluetoothManager.openGattServer(getContext(), gattServerCallback);
+        if (gattServer == null) {
+            throw new Exception("Failed to open GATT server");
+        }
+
+        for (int i = 0; i < gattServerArray.length(); i++) {
+            JSObject serviceObj = new JSObject(gattServerArray.getJSONObject(i).toString());
+            String serviceUuid = normalizeUuid(serviceObj.getString("uuid"));
+            boolean primary = serviceObj.optBoolean("primary", true);
+
+            int serviceType = primary
+                ? BluetoothGattService.SERVICE_TYPE_PRIMARY
+                : BluetoothGattService.SERVICE_TYPE_SECONDARY;
+
+            BluetoothGattService service = new BluetoothGattService(
+                UUID.fromString(serviceUuid), serviceType
+            );
+
+            JSONArray characteristicsJson = serviceObj.optJSONArray("characteristics");
+            if (characteristicsJson != null) {
+                JSArray characteristicsArray = new JSArray(characteristicsJson.toString());
+                for (int j = 0; j < characteristicsArray.length(); j++) {
+                    JSObject charObj = new JSObject(characteristicsArray.getJSONObject(j).toString());
+                    String charUuid = normalizeUuid(charObj.getString("uuid"));
+
+                    int properties = 0;
+                    int permissions = 0;
+
+                    if (charObj.optBoolean("read", false)) {
+                        properties |= BluetoothGattCharacteristic.PROPERTY_READ;
+                        permissions |= BluetoothGattCharacteristic.PERMISSION_READ;
+                    }
+                    if (charObj.optBoolean("write", false)) {
+                        properties |= BluetoothGattCharacteristic.PROPERTY_WRITE;
+                        permissions |= BluetoothGattCharacteristic.PERMISSION_WRITE;
+                    }
+                    if (charObj.optBoolean("writeWithoutResponse", false)) {
+                        properties |= BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE;
+                        permissions |= BluetoothGattCharacteristic.PERMISSION_WRITE;
+                    }
+                    if (charObj.optBoolean("notify", false)) {
+                        properties |= BluetoothGattCharacteristic.PROPERTY_NOTIFY;
+                        permissions |= BluetoothGattCharacteristic.PERMISSION_READ;
+                    }
+                    if (charObj.optBoolean("indicate", false)) {
+                        properties |= BluetoothGattCharacteristic.PROPERTY_INDICATE;
+                        permissions |= BluetoothGattCharacteristic.PERMISSION_READ;
+                    }
+
+                    // Ensure at least read permission if nothing specified
+                    if (properties == 0) {
+                        properties = BluetoothGattCharacteristic.PROPERTY_READ;
+                        permissions = BluetoothGattCharacteristic.PERMISSION_READ;
+                    }
+
+                    BluetoothGattCharacteristic characteristic = new BluetoothGattCharacteristic(
+                        UUID.fromString(charUuid), properties, permissions
+                    );
+
+                    // Set initial value
+                    JSONArray valueJson = charObj.optJSONArray("value");
+                    if (valueJson != null) {
+                        JSArray valueArray = new JSArray(valueJson.toString());
+                        byte[] value = jsArrayToBytes(valueArray);
+                        characteristic.setValue(value);
+                        characteristicValues.put(UUID.fromString(charUuid), value);
+                    }
+
+                    // Add CCCD descriptor if notify or indicate is supported
+                    if ((properties & BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0 ||
+                        (properties & BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0) {
+                        BluetoothGattDescriptor cccd = new BluetoothGattDescriptor(
+                            CLIENT_CHARACTERISTIC_CONFIG,
+                            BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE
+                        );
+                        characteristic.addDescriptor(cccd);
+                    }
+
+                    service.addCharacteristic(characteristic);
+                }
+
+                // Add service UUID to advertise data
+                dataBuilder.addServiceUuid(ParcelUuid.fromString(serviceUuid));
+            }
+
+            gattServer.addService(service);
+        }
+    }
+
+    private void closeGattServer() {
+        if (gattServer != null) {
+            try {
+                gattServer.close();
+            } catch (Exception e) {
+                // Ignore
+            }
+            gattServer = null;
+        }
+    }
+
+    private final BluetoothGattServerCallback gattServerCallback = new BluetoothGattServerCallback() {
+        @Override
+        public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                JSObject event = new JSObject();
+                event.put("deviceId", device.getAddress());
+                notifyListeners("deviceConnected", event);
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                JSObject event = new JSObject();
+                event.put("deviceId", device.getAddress());
+                notifyListeners("deviceDisconnected", event);
+            }
+        }
+
+        @Override
+        public void onCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset,
+                                                 BluetoothGattCharacteristic characteristic) {
+            byte[] value = characteristicValues.get(characteristic.getUuid());
+            if (value == null) {
+                value = characteristic.getValue();
+            }
+            if (value == null) {
+                value = new byte[0];
+            }
+
+            if (offset > 0 && offset < value.length) {
+                byte[] offsetValue = new byte[value.length - offset];
+                System.arraycopy(value, offset, offsetValue, 0, offsetValue.length);
+                gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, offsetValue);
+            } else {
+                gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, value);
+            }
+        }
+
+        @Override
+        public void onCharacteristicWriteRequest(BluetoothDevice device, int requestId,
+                                                  BluetoothGattCharacteristic characteristic,
+                                                  boolean preparedWrite, boolean responseNeeded,
+                                                  int offset, byte[] value) {
+            // Update the stored value
+            characteristic.setValue(value);
+            characteristicValues.put(characteristic.getUuid(), value);
+
+            if (responseNeeded) {
+                gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null);
+            }
+
+            // Notify listeners
+            JSObject event = new JSObject();
+            event.put("deviceId", device.getAddress());
+            event.put("service", characteristic.getService().getUuid().toString());
+            event.put("characteristic", characteristic.getUuid().toString());
+            event.put("value", bytesToJsArray(value));
+            notifyListeners("characteristicChanged", event);
+        }
+
+        @Override
+        public void onDescriptorReadRequest(BluetoothDevice device, int requestId, int offset,
+                                             BluetoothGattDescriptor descriptor) {
+            byte[] value = descriptor.getValue();
+            if (value == null) {
+                value = new byte[0];
+            }
+            gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, value);
+        }
+
+        @Override
+        public void onDescriptorWriteRequest(BluetoothDevice device, int requestId,
+                                              BluetoothGattDescriptor descriptor,
+                                              boolean preparedWrite, boolean responseNeeded,
+                                              int offset, byte[] value) {
+            descriptor.setValue(value);
+            if (responseNeeded) {
+                gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null);
+            }
+
+            // Handle CCCD subscription notifications
+            if (descriptor.getUuid().equals(CLIENT_CHARACTERISTIC_CONFIG)) {
+                // Client subscribed/unsubscribed to notifications
+                JSObject event = new JSObject();
+                event.put("deviceId", device.getAddress());
+                event.put("service", descriptor.getCharacteristic().getService().getUuid().toString());
+                event.put("characteristic", descriptor.getCharacteristic().getUuid().toString());
+                event.put("value", bytesToJsArray(value));
+                notifyListeners("characteristicChanged", event);
+            }
+        }
+
+        @Override
+        public void onNotificationSent(BluetoothDevice device, int status) {
+            // Notification sent
+        }
+    };
+
     @PluginMethod
     public void stopAdvertising(PluginCall call) {
         if (bluetoothLeAdvertiser != null && advertiseCallback != null) {
@@ -923,6 +1140,7 @@ public class BluetoothLowEnergyPlugin extends Plugin {
                 // Ignore
             }
         }
+        closeGattServer();
         call.resolve();
     }
 

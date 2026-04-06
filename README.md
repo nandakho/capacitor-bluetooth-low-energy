@@ -13,7 +13,7 @@ Bluetooth Low Energy (BLE) plugin for Capacitor with support for scanning, conne
 A comprehensive, **free**, and **powerful** BLE plugin:
 
 - **Full BLE support** - Scan, connect, read, write, and receive notifications
-- **Peripheral mode** - Act as a BLE server and advertise services (Android/iOS)
+- **Peripheral mode** - Act as a BLE server and advertise services with GATT server support (Android)
 - **Service discovery** - Automatically discover services, characteristics, and descriptors
 - **Background support** - Foreground service for Android, background modes for iOS
 - **Permission handling** - Built-in permission management for Android 12+ and iOS
@@ -586,8 +586,40 @@ Start advertising as a peripheral (BLE server).
 
 **Since:** 1.0.0
 
---------------------
+**Example: Advertise with GATT server and characteristics (Android)**
 
+```typescript
+await BluetoothLowEnergy.initialize({ mode: 'peripheral' });
+
+await BluetoothLowEnergy.startAdvertising({
+  name: 'MyDevice',
+  gattServer: [
+    {
+      uuid: '180D', // Heart Rate Service
+      characteristics: [
+        {
+          uuid: '2A37', // Heart Rate Measurement
+          notify: true,
+          read: true,
+        },
+        {
+          uuid: '2A38', // Body Sensor Location
+          read: true,
+          value: [0x01], // Chest
+        },
+        {
+          uuid: '2A39', // Heart Rate Control Point
+          write: true,
+        },
+      ],
+    },
+  ],
+});
+```
+
+When a remote device writes to a characteristic, the `characteristicChanged` event fires with the new value.
+
+--------------------
 
 ### stopAdvertising()
 
@@ -1081,12 +1113,37 @@ Options for requesting connection priority.
 
 Options for starting advertising.
 
-| Prop                      | Type                  | Description                                              | Default            | Since |
-| ------------------------- | --------------------- | -------------------------------------------------------- | ------------------ | ----- |
-| **`name`**                | <code>string</code>   | The device name to advertise.                            |                    | 1.0.0 |
-| **`services`**            | <code>string[]</code> | Service UUIDs to advertise.                              |                    | 1.0.0 |
-| **`includeName`**         | <code>boolean</code>  | Whether to include the device name in the advertisement. | <code>true</code>  | 1.0.0 |
-| **`includeTxPowerLevel`** | <code>boolean</code>  | Whether to include TX power level in the advertisement.  | <code>false</code> | 1.0.0 |
+| Prop                      | Type                                          | Description                                                                                                                                          | Default            | Since |
+| ------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ----- |
+| **`name`**                | <code>string</code>                           | The device name to advertise.                                                                                                                        |                    | 1.0.0 |
+| **`services`**            | <code>string[]</code>                         | Service UUIDs to advertise.                                                                                                                          |                    | 1.0.0 |
+| **`includeName`**         | <code>boolean</code>                          | Whether to include the device name in the advertisement.                                                                                             | <code>true</code>  | 1.0.0 |
+| **`includeTxPowerLevel`** | <code>boolean</code>                          | Whether to include TX power level in the advertisement.                                                                                              | <code>false</code> | 1.0.0 |
+| **`gattServer`**          | <code><a href="#gattserverservice">GattServerService</a>[]</code> | GATT server services with characteristics to host while advertising (Android only). When provided, a GATT server is created and clients can read/write to the characteristics. |                    | 1.2.0 |
+
+#### GattServerService
+
+A service definition for GATT server advertising.
+
+| Prop                   | Type                                                         | Description                                          | Default           | Since |
+| ---------------------- | ------------------------------------------------------------ | ---------------------------------------------------- | ----------------- | ----- |
+| **`uuid`**             | <code>string</code>                                          | The service UUID.                                    |                   | 1.2.0 |
+| **`primary`**          | <code>boolean</code>                                         | Whether this is a primary service.                   | <code>true</code> | 1.2.0 |
+| **`characteristics`**  | <code><a href="#gattservercharacteristic">GattServerCharacteristic</a>[]</code> | Characteristics to include in this service.          |                   | 1.2.0 |
+
+#### GattServerCharacteristic
+
+A characteristic definition for GATT server advertising.
+
+| Prop                         | Type                  | Description                                           | Default            | Since |
+| ---------------------------- | --------------------- | ----------------------------------------------------- | ------------------ | ----- |
+| **`uuid`**                   | <code>string</code>   | The characteristic UUID.                              |                    | 1.2.0 |
+| **`read`**                   | <code>boolean</code>  | Whether the characteristic supports read.             | <code>false</code> | 1.2.0 |
+| **`write`**                  | <code>boolean</code>  | Whether the characteristic supports write.            | <code>false</code> | 1.2.0 |
+| **`writeWithoutResponse`**   | <code>boolean</code>  | Whether the characteristic supports write without response. | <code>false</code> | 1.2.0 |
+| **`notify`**                 | <code>boolean</code>  | Whether the characteristic supports notify.           | <code>false</code> | 1.2.0 |
+| **`indicate`**               | <code>boolean</code>  | Whether the characteristic supports indicate.         | <code>false</code> | 1.2.0 |
+| **`value`**                  | <code>number[]</code> | Initial value as an array of bytes.                   |                    | 1.2.0 |
 
 
 #### StartForegroundServiceOptions
