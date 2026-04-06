@@ -54,7 +54,12 @@ import org.json.JSONArray;
             alias = "bluetooth",
             strings = {
                 Manifest.permission.BLUETOOTH,
-                Manifest.permission.BLUETOOTH_ADMIN,
+                Manifest.permission.BLUETOOTH_ADMIN
+            }
+        ),
+        @Permission(
+            alias = "bluetoothNew",
+            strings = {
                 Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_CONNECT,
                 Manifest.permission.BLUETOOTH_ADVERTISE
@@ -193,10 +198,15 @@ public class BluetoothLowEnergyPlugin extends Plugin {
     @PluginMethod
     public void requestPermissions(PluginCall call) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            requestPermissionForAlias("bluetooth", call, "permissionCallback");
+            requestPermissionForAlias("bluetoothNew", call, "permissionCallback");
         } else {
-            requestPermissionForAlias("location", call, "permissionCallback");
+            requestPermissionForAlias("bluetooth", call, "bluetoothLegacyCallback");
         }
+    }
+
+    @PermissionCallback
+    private void bluetoothLegacyCallback(PluginCall call) {
+        requestPermissionForAlias("location", call, "permissionCallback");
     }
 
     @PermissionCallback
@@ -210,12 +220,17 @@ public class BluetoothLowEnergyPlugin extends Plugin {
     private String getBluetoothPermissionState() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (ActivityCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
-                ActivityCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+                ActivityCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED) {
                 return "granted";
             }
             return "prompt";
         }
-        return "granted";
+        if (ActivityCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
+            ActivityCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED) {
+            return "granted";
+        }
+        return "prompt";
     }
 
     private String getLocationPermissionState() {
@@ -877,6 +892,14 @@ public class BluetoothLowEnergyPlugin extends Plugin {
             return;
         }
 
+        if (!hasAdvertisePermission()) {
+            call.reject("Missing the following permissions in AndroidManifest.xml:\n" +
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                    ? "android.permission.BLUETOOTH_ADVERTISE\nandroid.permission.BLUETOOTH_CONNECT"
+                    : "android.permission.BLUETOOTH_ADMIN\nandroid.permission.BLUETOOTH"));
+            return;
+        }
+
         String name = call.getString("name");
         JSArray servicesArray = call.getArray("services");
         JSArray gattServerArray = call.getArray("gattServer");
@@ -1311,6 +1334,15 @@ public class BluetoothLowEnergyPlugin extends Plugin {
                    ActivityCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
         } else {
             return ActivityCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        }
+    }
+
+    private boolean hasAdvertisePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return ActivityCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED &&
+                   ActivityCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+        } else {
+            return ActivityCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED;
         }
     }
 
